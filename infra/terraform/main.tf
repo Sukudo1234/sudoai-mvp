@@ -65,12 +65,13 @@ module "storage" {
 module "database" {
   source = "./modules/database"
   
-  name_prefix    = local.name_prefix
-  vpc_id         = module.networking.vpc_id
-  subnet_ids     = module.networking.private_subnet_ids
-  min_capacity   = var.db_min_capacity
-  max_capacity   = var.db_max_capacity
-  tags           = local.tags
+  name_prefix             = local.name_prefix
+  vpc_id                  = module.networking.vpc_id
+  subnet_ids              = module.networking.private_subnet_ids
+  vpc_security_group_id   = module.networking.database_security_group_id
+  min_capacity            = var.db_min_capacity
+  max_capacity            = var.db_max_capacity
+  tags                    = local.tags
 }
 
 module "messaging" {
