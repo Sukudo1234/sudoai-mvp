@@ -1,8 +1,17 @@
 services:
+  # ===== CORE INFRASTRUCTURE =====
+  
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   minio:
     image: minio/minio:latest
@@ -15,6 +24,11 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
   mc:
     image: minio/mc
@@ -25,6 +39,7 @@ services:
       until (mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin}); do echo '...waiting for minio...' && sleep 2; done;
       mc mb -p local/results || true;
       mc mb -p local/uploads || true;
+      echo 'MinIO buckets created successfully';
       exit 0;
       "
 
@@ -45,31 +60,94 @@ services:
       -behind-proxy
       -host 0.0.0.0
       -port 1080
+      -max-size 10737418240
     ports:
       - "8080:1080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1080/files"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===== DATABASE (LOCAL DEVELOPMENT) =====
+  
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sudoai}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ===== APPLICATION SERVICES =====
 
   api:
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./api/Dockerfile
+    environment:
+      - ENVIRONMENT=local
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/sudoai
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=http://minio:9000
+      - TUSD_PUBLIC_URL=http://localhost:8080
+      - TUSD_INTERNAL_URL=http://tusd:1080
     env_file:
       - ./.env
     depends_on:
-      - redis
-      - tusd
-      - minio
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      tusd:
+        condition: service_healthy
     ports:
       - "8000:8000"
+    volumes:
+      - ./shared:/app/shared:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   worker:
     build:
-      context: ./worker
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./worker/Dockerfile
+    environment:
+      - ENVIRONMENT=local
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/sudoai
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=http://minio:9000
+      - TUSD_INTERNAL_URL=http://tusd:1080
     env_file:
       - ./.env
     depends_on:
-      - redis
-      - minio
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./shared:/app/shared:ro
+    command: ["python", "/app/scripts/run-worker.py", "celery"]
 
 volumes:
   minio_data:
+    driver: local
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
