@@ -1,7 +1,20 @@
-celery==5.4.0
-redis==5.0.7
+# Enhanced worker requirements for dual-mode operation
 boto3==1.34.162
 requests==2.32.3
-python-dotenv==1.0.1
 loguru==0.7.2
-pydub==0.25.1
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.7
+
+# Celery for local development (optional)
+celery==5.4.0
+redis==5.0.7
+
+# Media processing
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Demucs for audio separation (installed in Dockerfile)
+# demucs
+
+# FFmpeg Python bindings (optional)
+ffmpeg-python==0.2.0
