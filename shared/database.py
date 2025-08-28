@@ -2,7 +2,7 @@
 Database management with job persistence for production environment
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from enum import Enum
 from sqlalchemy import create_engine, Column, String, DateTime, Text, Integer, JSON, Index
