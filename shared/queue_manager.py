@@ -308,7 +308,7 @@ class SQSQueueManager(BaseQueueManager):
                             job_dict['status'] = JobStatus.FAILED.value
                             
                 except Exception as e:
-                    logger.warning(f"Failed to get Batch status for job {batch_job_id}: {e}")
+                    logger.warning(f"Failed to get Batch status for job {job.batch_job_id}: {e}")
             
             return job_dict
             
