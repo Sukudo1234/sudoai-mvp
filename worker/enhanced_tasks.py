@@ -207,6 +207,224 @@ class TaskProcessor:
                     shutil.rmtree(output_dir)
                 except:
                     pass
+    
+    def merge_task(self, task_id: str, video_url: str, audio_url: str, offset_sec: float = 0.0) -> Dict[str, Any]:
+        """Video/audio merging using FFmpeg (CPU task)"""
+        
+        self.update_job_status(task_id, JobStatus.RUNNING)
+        logger.info(f"Starting merge task {task_id}")
+        
+        video_file = None
+        audio_file = None
+        output_file = None
+        
+        try:
+            # Download input files
+            video_file, video_name = self.download_input_file(video_url)
+            audio_file, audio_name = self.download_input_file(audio_url)
+            
+            # Prepare output file
+            output_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+            
+            # Build FFmpeg command
+            cmd = ["ffmpeg", "-y", "-i", video_file]
+            
+            if abs(offset_sec) > 0.0001:
+                cmd.extend(["-itsoffset", str(offset_sec)])
+            
+            cmd.extend([
+                "-i", audio_file,
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-c:v", "copy", "-c:a", "aac",
+                "-shortest", output_file
+            ])
+            
+            try:
+                self.run_command(cmd)
+            except RuntimeError:
+                # Fallback to re-encoding video if copy fails
+                logger.warning("Video copy failed, trying with re-encoding")
+                cmd_fallback = [
+                    "ffmpeg", "-y", "-i", video_file, "-i", audio_file,
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-c:v", "libx264", "-c:a", "aac",
+                    "-shortest", output_file
+                ]
+                self.run_command(cmd_fallback)
+            
+            # Upload result
+            merged_filename = f"{os.path.splitext(video_name)[0]}_merged.mp4"
+            download_url = self.upload_result_file(output_file, task_id, merged_filename)
+            
+            result = {
+                "video": video_name,
+                "audio": audio_name,
+                "result": {
+                    "key": f"out/{task_id}/{merged_filename}",
+                    "url": download_url
+                }
+            }
+            
+            self.update_job_status(task_id, JobStatus.COMPLETED, result=result)
+            logger.info(f"Completed merge task {task_id}")
+            return result
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Merge task {task_id} failed: {error_msg}")
+            self.update_job_status(task_id, JobStatus.FAILED, error_message=error_msg)
+            raise
+        finally:
+            # Cleanup temporary files
+            for temp_file in [video_file, audio_file, output_file]:
+                if temp_file and os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except:
+                        pass
+    
+    def transcribe_task(self, task_id: str, tus_url: str, target_languages: list = None) -> Dict[str, Any]:
+        """Audio transcription using ElevenLabs API (CPU task)"""
+        
+        self.update_job_status(task_id, JobStatus.RUNNING)
+        logger.info(f"Starting transcribe task {task_id}")
+        
+        if target_languages is None:
+            target_languages = ["original"]
+        
+        input_file = None
+        wav_file = None
+        
+        try:
+            # Download input file
+            input_file, filename = self.download_input_file(tus_url)
+            
+            # Convert to WAV format for transcription
+            wav_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
+            self.run_command([
+                "ffmpeg", "-y", "-i", input_file,
+                "-ac", "1", "-ar", "16000", wav_file
+            ])
+            
+            # Check if ElevenLabs is configured
+            elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "")
+            elevenlabs_url = os.getenv("ELEVENLABS_TRANSCRIBE_URL", "")
+            
+            if not elevenlabs_key or not elevenlabs_url or elevenlabs_url == "REPLACE_ME":
+                # Upload the processed audio file as fallback
+                wav_download_url = self.upload_result_file(wav_file, task_id, f"{os.path.splitext(filename)[0]}.wav")
+                
+                result = {
+                    "warning": "Set ELEVENLABS_API_KEY and ELEVENLABS_TRANSCRIBE_URL to enable transcription.",
+                    "audio_url": wav_download_url
+                }
+                
+                self.update_job_status(task_id, JobStatus.COMPLETED, result=result)
+                return result
+            
+            # Call ElevenLabs transcription API
+            import requests
+            
+            headers = {"xi-api-key": elevenlabs_key}
+            files = {"file": (os.path.basename(wav_file), open(wav_file, "rb"), "audio/wav")}
+            data = {
+                "language": os.getenv("ELEVENLABS_LANGUAGE", "auto"),
+                "output_format": os.getenv("ELEVENLABS_OUTPUT_FORMAT", "srt")
+            }
+            
+            response = requests.post(elevenlabs_url, headers=headers, files=files, data=data)
+            
+            if response.status_code >= 300:
+                raise RuntimeError(f"Transcription failed: {response.status_code} {response.text}")
+            
+            # Save transcription result
+            srt_file = tempfile.NamedTemporaryFile(delete=False, suffix=".srt").name
+            with open(srt_file, "wb") as f:
+                f.write(response.content)
+            
+            # Upload transcription result
+            srt_filename = f"{os.path.splitext(filename)[0]}.srt"
+            srt_download_url = self.upload_result_file(srt_file, task_id, srt_filename)
+            
+            result = {
+                "filename": filename,
+                "srt": {
+                    "key": f"out/{task_id}/{srt_filename}",
+                    "url": srt_download_url
+                }
+            }
+            
+            self.update_job_status(task_id, JobStatus.COMPLETED, result=result)
+            logger.info(f"Completed transcribe task {task_id}")
+            return result
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Transcribe task {task_id} failed: {error_msg}")
+            self.update_job_status(task_id, JobStatus.FAILED, error_message=error_msg)
+            raise
+        finally:
+            # Cleanup temporary files
+            for temp_file in [input_file, wav_file]:
+                if temp_file and os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except:
+                        pass
+    
+    def rename_task(self, task_id: str, keys: list, pattern: str, start_index: int = 1, pad: int = 2, dry_run: bool = False) -> Dict[str, Any]:
+        """Batch file renaming in storage (CPU task)"""
+        
+        self.update_job_status(task_id, JobStatus.RUNNING)
+        logger.info(f"Starting rename task {task_id} ({'dry run' if dry_run else 'live run'})")
+        
+        try:
+            mapping = []
+            idx = start_index
+            
+            for key in keys:
+                base = os.path.splitext(os.path.basename(key))[0]
+                ext = os.path.splitext(key)[1]
+                
+                newname = pattern.replace("{index}", str(idx).zfill(pad)).replace("{basename}", base).replace("{ext}", ext)
+                newkey = os.path.join(os.path.dirname(key), newname).replace("\\", "/")
+                
+                mapping.append({"from": key, "to": newkey})
+                idx += 1
+            
+            if dry_run:
+                result = {"dryRun": True, "mapping": mapping}
+                self.update_job_status(task_id, JobStatus.COMPLETED, result=result)
+                return result
+            
+            # Execute renames using storage manager
+            s3_client = self.storage.s3_client
+            
+            for rename_op in mapping:
+                try:
+                    # Copy object to new key
+                    copy_source = {"Bucket": self.config.storage.out_bucket, "Key": rename_op["from"]}
+                    s3_client.copy(copy_source, self.config.storage.out_bucket, rename_op["to"])
+                    
+                    # Delete old key
+                    s3_client.delete_object(Bucket=self.config.storage.out_bucket, Key=rename_op["from"])
+                    
+                    logger.info(f"Renamed {rename_op['from']} -> {rename_op['to']}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to rename {rename_op['from']}: {e}")
+                    # Continue with other renames
+            
+            result = {"dryRun": False, "mapping": mapping}
+            self.update_job_status(task_id, JobStatus.COMPLETED, result=result)
+            logger.info(f"Completed rename task {task_id}")
+            return result
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Rename task {task_id} failed: {error_msg}")
+            self.update_job_status(task_id, JobStatus.FAILED, error_message=error_msg)
+            raise
 
 
 # Global task processor instance
