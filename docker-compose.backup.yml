@@ -1,0 +1,98 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  mc:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until (mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin}); do echo '...waiting for minio...' && sleep 2; done;
+      mc mb -p local/results || true;
+      mc mb -p local/uploads || true;
+      exit 0;
+      "
+  
+    tusd:
+    image: tusproject/tusd:latest
+    depends_on:
+      - minio
+      - mc
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      AWS_REGION: ${MINIO_REGION:-us-east-1}   # <-- use AWS_REGION (not S3_REGION)
+    command: >
+      -s3-bucket uploads
+      -s3-endpoint http://minio:9000
+      -s3-object-prefix uploads/
+      -s3-disable-ssl
+      -behind-proxy
+      -host 0.0.0.0              # <-- bind correctly
+      -port 1080
+    ports:
+      - "8080:1080"
+
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    env_file:
+      - ./.env
+    depends_on:
+      - redis
+      - tusd
+      - minio
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}
+    env_file:
+      - ./.env
+    depends_on:
+      - redis
+      - tusd
+      - minio
+    # Uncomment the next 4 lines if you have NVIDIA GPU + Docker configured
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: ["gpu"]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+
+  flower:
+    image: mher/flower:latest
+    command: >
+      flower --broker=${REDIS_URL:-redis://redis:6379/0} --port=5555
+    depends_on:
+      - redis
+    ports:
+      - "5555:5555"
+
+volumes:
+  minio_data:

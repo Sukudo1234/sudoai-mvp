@@ -1,0 +1,40 @@
+﻿# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Env & secrets
+.env
+.env.*.local
+!.env.example
+
+# Docker / local overrides
+*.local.yml
+
+# OS junk
+.DS_Store
+Thumbs.db
+# --- extra ignores (safe to append) ---
+# env
+.env
+.env.*.local
+
+# node/next anywhere
+**/node_modules/
+**/.next/
+**/.vercel/
+**/out/
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# local docker overrides
+*.local.yml
+
+# OS
+.DS_Store
+Thumbs.db
