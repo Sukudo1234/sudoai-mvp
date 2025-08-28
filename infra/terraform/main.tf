@@ -86,18 +86,20 @@ module "messaging" {
 module "compute" {
   source = "./modules/compute"
   
-  name_prefix           = local.name_prefix
-  vpc_id               = module.networking.vpc_id
-  subnet_ids           = module.networking.private_subnet_ids
-  cpu_instance_types   = var.cpu_instance_types
-  gpu_instance_types   = var.gpu_instance_types
-  spot_percentage      = var.batch_spot_percentage
-  ecr_repository_url   = module.container_registry.repository_url
-  s3_raw_bucket        = module.storage.raw_bucket_name
-  s3_out_bucket        = module.storage.out_bucket_name
-  sqs_queue_url        = module.messaging.queue_url
-  database_url         = module.database.connection_url
-  tags                 = local.tags
+  name_prefix              = local.name_prefix
+  vpc_id                   = module.networking.vpc_id
+  subnet_ids               = module.networking.private_subnet_ids
+  batch_security_group_id  = module.networking.batch_security_group_id
+  cpu_instance_types       = var.cpu_instance_types
+  gpu_instance_types       = var.gpu_instance_types
+  spot_percentage          = var.batch_spot_percentage
+  ecr_repository_url       = module.container_registry.repository_url
+  s3_raw_bucket            = module.storage.raw_bucket_name
+  s3_out_bucket            = module.storage.out_bucket_name
+  sqs_queue_url            = module.messaging.queue_url
+  sqs_queue_arn            = module.messaging.queue_arn
+  database_url             = module.database.connection_url
+  tags                     = local.tags
 }
 
 module "container_registry" {
