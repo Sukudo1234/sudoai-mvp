@@ -503,6 +503,28 @@ def batch_main():
         
         if job_type == 'split':
             result = task_processor.split_task(task_id, params['tus_url'])
+        elif job_type == 'merge':
+            result = task_processor.merge_task(
+                task_id, 
+                params['video_tus_url'], 
+                params['audio_tus_url'], 
+                params.get('offset_sec', 0.0)
+            )
+        elif job_type == 'transcribe':
+            result = task_processor.transcribe_task(
+                task_id, 
+                params['tus_url'], 
+                params.get('target_languages', ['original'])
+            )
+        elif job_type == 'rename':
+            result = task_processor.rename_task(
+                task_id,
+                params['keys'],
+                params['pattern'],
+                params.get('start_index', 1),
+                params.get('pad', 2),
+                params.get('dryRun', False)
+            )
         else:
             raise ValueError(f"Unknown job type: {job_type}")
         
