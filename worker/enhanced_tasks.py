@@ -457,6 +457,21 @@ if config.environment == Environment.LOCAL:
             task_id = split_task_celery.request.id
             return task_processor.split_task(task_id, tus_url)
         
+        @celery_app.task(name="tasks.merge_task")
+        def merge_task_celery(video_url: str, audio_url: str, offset_sec: float = 0.0):
+            task_id = merge_task_celery.request.id
+            return task_processor.merge_task(task_id, video_url, audio_url, offset_sec)
+        
+        @celery_app.task(name="tasks.transcribe_task")
+        def transcribe_task_celery(tus_url: str, target_languages: list = None):
+            task_id = transcribe_task_celery.request.id
+            return task_processor.transcribe_task(task_id, tus_url, target_languages)
+        
+        @celery_app.task(name="tasks.rename_task")
+        def rename_task_celery(keys: list, pattern: str, start_index: int = 1, pad: int = 2, dry_run: bool = False):
+            task_id = rename_task_celery.request.id
+            return task_processor.rename_task(task_id, keys, pattern, start_index, pad, dry_run)
+        
         logger.info("Celery tasks registered for local development")
         
     except ImportError:
