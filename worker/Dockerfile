@@ -1,11 +1,9 @@
-# Multi-stage Dockerfile for production worker
-# Supports both CPU and GPU workloads
-
-FROM nvidia/cuda:11.8-devel-ubuntu22.04 as base
+FROM nvidia/cuda:11.8-devel-ubuntu22.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 ENV CUDA_VISIBLE_DEVICES=all
 
 # Install system dependencies
@@ -27,24 +25,26 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 WORKDIR /app
 
 # Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+COPY worker/requirements.txt /app/requirements.txt
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir -r /app/requirements.txt
 
 # Install Demucs for audio separation (GPU task)
 RUN pip3 install --no-cache-dir demucs
 
 # Copy shared modules
-COPY ../shared /app/shared
+COPY shared /app/shared
 
 # Copy worker code
-COPY . /app/worker
+COPY worker /app/worker
 
-# Set Python path
-ENV PYTHONPATH=/app:/app/worker:/app/shared
+# Copy scripts
+COPY scripts /app/scripts
 
 # Create non-root user for security
 RUN useradd -m -u 1000 worker && \
-    chown -R worker:worker /app
+    chown -R worker:worker /app && \
+    chmod +x /app/scripts/*.py
 
 USER worker
 
@@ -52,8 +52,8 @@ USER worker
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python -c "import sys; sys.exit(0)"
 
-# Default entry point for AWS Batch
-ENTRYPOINT ["python", "/app/worker/enhanced_tasks.py"]
+# Default entry point
+ENTRYPOINT ["python", "/app/scripts/run-worker.py"]
 
-# Default command (can be overridden by Batch job definition)
-CMD ["split"]
+# Default command 
+CMD ["start"]
